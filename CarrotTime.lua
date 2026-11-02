@@ -35,7 +35,8 @@ _addon.command = 'crt'
 require('logger')
 local config = require('config')
 local texts = require('texts')
-local windower = require('windower')
+
+local settings = config.load('data/settings.xml', defaults)
 
 ------------------------------------------------------------------------
 -- Defaults and persistent settings
