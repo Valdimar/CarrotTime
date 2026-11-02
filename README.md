@@ -177,3 +177,35 @@ The digging path is intended for players working toward the **Bore** and **Burro
 CarrotTime can track the selected path and recorded abilities. It does not automatically determine whether an in-game ability has been learned.
 
 ### Racing
+
+The racing path is intended for players working toward **Gallop** and **Canter**.
+
+Racing stat targets can be adjusted to suit the player's plan. The default targets are configurable and should be treated as a planning reference, not a guarantee of race performance.
+
+## Data and persistence
+
+CarrotTime uses Windower’s configuration system to save its tracking information.
+
+Saved information includes:
+
+- Chocobo path and age
+- Egg-phase watch count
+- Recorded stats and abilities
+- Racing targets and focus
+- Race history
+- Daily care tasks
+- Notes
+
+The addon is a manual tracker. It does not automatically inspect chocobo status, care events, or race outcomes from the game client. Players enter this information using commands.
+
+## Compatibility
+
+- **Game:** Final Fantasy XI
+- **Addon framework:** Windower 4
+- **Language:** Lua
+
+## Disclaimer
+
+CarrotTime is an unofficial community addon and should be used at your own risk.
+
+Use it as a personal tracking and planning tool. Chocobo raising outcomes depend on in-game mechanics and player actions.
