@@ -14,7 +14,9 @@
       //crt target <stat> <rank>      Set a target rank for a stat
       //crt hatch <YYYY-MM-DD>        Hatch date (age is worked out from it)
       //crt age <days>                Set age by hand (clears hatch date)
-      //crt watches <number>          Egg-phase watch count
+      //crt watch                     Add one egg-phase watch (also counted
+                                      automatically when you watch the egg)
+      //crt watches <number>          Set the egg-phase watch count
       //crt ability <name> [off]      Record a learned ability (or remove it)
       //crt care                      Show today's care checklist
       //crt care <task> | done <task> Log a care task for today
@@ -24,6 +26,7 @@
       //crt race win | loss | place <n>
       //crt race history              Last 10 races and totals
       //crt status                    Summary in chat
+      //crt capture [off]             Save chat lines to data/capture.txt (10 min)
       //crt reset confirm             Wipe this character's chocobo data
 
     Stats: strength (str), endurance (end), discernment (dsc), receptivity (rcp)
@@ -600,6 +603,10 @@ local function set_age(days)
 end
 
 local function set_watches(count)
+    -- No number (or "+"): add one watch to the current count.
+    if count == nil or count == '' or count == '+' then
+        count = (tonumber(settings.egg_watches) or 0) + 1
+    end
     count = valid_number(count)
     if not count then
         err('watches must be a non-negative whole number.')
@@ -753,17 +760,88 @@ local function status()
     windower.add_to_chat(207, '  Next: ' .. next_advice())
 end
 
+------------------------------------------------------------------------
+-- Capture: saves every chat / NPC dialogue line to a file, so the exact
+-- wording of chocobo messages can be found and auto-detected later.
+------------------------------------------------------------------------
+
+local capture_until = 0          -- os.time() when capture switches off
+local CAPTURE_MINUTES = 10
+local last_watch_time = 0        -- os.time() of the last auto-counted watch
+
+local function capture_path()
+    return windower.addon_path .. 'data/capture.txt'
+end
+
+local function set_capture(arg)
+    arg = lower(arg)
+    if arg == 'off' then
+        capture_until = 0
+        say('capture off. Lines saved in addons/CarrotTime/data/capture.txt')
+        return
+    end
+
+    local dir = windower.addon_path .. 'data/'
+    if not windower.dir_exists(dir) then
+        windower.create_dir(dir)
+    end
+    local f = io.open(capture_path(), 'a')
+    if f then
+        f:write('\n==== capture started ' .. os.date('%Y-%m-%d %H:%M:%S') .. ' ====\n')
+        f:close()
+    end
+
+    capture_until = os.time() + CAPTURE_MINUTES * 60
+    say('capture on for ' .. CAPTURE_MINUTES .. ' minutes. Talk to the NPC and have it '
+        .. 'watch the egg, then type //crt capture off.')
+end
+
+windower.register_event('incoming text', function(original, modified, mode)
+    -- Strip FFXI colour/auto-translate control bytes.
+    local clean = tostring(original or '')
+        :gsub('\30.', ''):gsub('\31.', ''):gsub('\127.', '')
+        :gsub('[%z\1-\8\11\12\14-\31]', '')
+
+    -- Egg watch: "Your egg feels the tender warmth of your gaze"
+    if settings and clean:lower():find('tender warmth of your gaze', 1, true) then
+        local now = os.time()
+        if now - last_watch_time > 5 then   -- ignore the same line repeated
+            last_watch_time = now
+            settings.egg_watches = (tonumber(settings.egg_watches) or 0) + 1
+            save()
+            update_ui()
+            say('egg watched - ' .. settings.egg_watches .. ' watches so far.')
+        end
+    end
+
+    if capture_until == 0 then
+        return
+    end
+    if os.time() > capture_until then
+        capture_until = 0
+        say('capture finished. Lines saved in addons/CarrotTime/data/capture.txt')
+        return
+    end
+
+    local f = io.open(capture_path(), 'a')
+    if f then
+        f:write(string.format('[%s] mode=%s  %s\n', os.date('%H:%M:%S'), tostring(mode), clean))
+        f:close()
+    end
+end)
+
 local function show_help()
     local lines = {
         'CarrotTime commands (//crt):',
         '  show | hide | toggle | pos <x> <y> | status',
         '  name <name> | type digging|racing | focus official|circuit|custom',
         '  stat <stat> <rank> | target <stat> <rank>   (str/end/dsc/rcp, F..SSS)',
-        '  hatch <YYYY-MM-DD> | age <days> | watches <n>',
+        '  hatch <YYYY-MM-DD> | age <days> | watch (adds 1) | watches <n>',
         '  ability <name> [off]',
         '  care | care <task> | done <task> | undo <task>   (feed exercise outing care story all)',
         '  note <text> | notes [clear]',
         '  race win | loss | place <n> | history | clear',
+        '  capture | capture off   (save chat lines to data/capture.txt)',
         '  reset confirm',
     }
     for _, l in ipairs(lines) do
@@ -835,6 +913,8 @@ windower.register_event('addon command', function(command, ...)
         race_command(args[1] or '', args[2])
     elseif command == 'status' then
         status()
+    elseif command == 'capture' then
+        set_capture(args[1])
     elseif command == 'reset' then
         if lower(args[1]) ~= 'confirm' then
             err('this wipes all chocobo data for ' .. char_name .. '. Type //crt reset confirm to do it.')
