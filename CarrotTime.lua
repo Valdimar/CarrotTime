@@ -1,11 +1,36 @@
 --[[
     CarrotTime
     Windower 4 Chocobo Raising Assistant
-    Version: 0.6.0
+    Version: 0.7
+
+    Changelog
+      v0.7  Watching the egg again soon after counts again (it used to be
+            ignored for 2 minutes after a counted watch).
+      v0.6  Day is read from the NPC's "Chocobo Status Report: Day #"
+            line and keeps counting up daily from there.
+      v0.5  First versioned release.
+            - Panel shows only while talking to a raising NPC
+              (Hantileon, Zopago, Pulonono); //crt mode always keeps it up.
+            - Egg watches counted automatically from the egg's reaction
+              after the NPC confirms the watch; "watched today" on the panel.
+            - Coloured panel with stat bars (now vs target), stage countdown,
+              care checklist, abilities, races and a next-step hint.
+            - Compact view, per-character save files, draggable panel,
+              debug mode and chat capture for troubleshooting.
+
+    Each update adds 0.1 to the version and gets a line above.
 
     Commands (//crt or //carrottime):
       //crt help                      List commands
-      //crt show | hide | toggle      Show / hide the panel
+      //crt mode npc | always         npc (default): the panel only appears while
+                                      you talk to a chocobo raising NPC.
+                                      always: the panel stays on screen.
+      //crt show | hide | toggle      Show / hide the panel (in npc mode, show
+                                      opens it until you hide it)
+      //crt npc [add|remove <name>]   List / change the NPCs that open the panel
+      //crt debug                     Print what the addon sees (NPC talks,
+                                      egg lines) to chat; again to turn off
+      //crt compact                   Toggle a smaller panel (stats + next step)
       //crt pos <x> <y>               Move the panel (or just drag it)
       //crt name <name>               Chocobo's name
       //crt type digging|racing       Raising path
@@ -40,10 +65,11 @@
 
 _addon.name = 'CarrotTime'
 _addon.author = 'ChatGPT'
-_addon.version = '0.6.0'
+_addon.version = '0.7'
 _addon.commands = {'crt', 'carrottime'}
 
 local texts = require('texts')
+local packets = require('packets')
 
 ------------------------------------------------------------------------
 -- Defaults
@@ -57,6 +83,7 @@ local defaults = {
     age_days = 0,
 
     egg_watches = 0,
+    last_watch_date = '',
 
     racing_focus = 'official', -- official, circuit, custom
     racing_targets = {
@@ -78,10 +105,15 @@ local defaults = {
     race_history = {},
     notes = {},
 
+    -- NPCs that open the panel in "npc" mode (the VCS raising NPCs).
+    raising_npcs = {'Hantileon', 'Zopago', 'Pulonono'},
+
     ui = {
         x = 200,
         y = 200,
-        visible = true,
+        visible = true,     -- used in "always" mode
+        compact = false,
+        mode = 'npc',       -- 'npc' or 'always'
     },
 }
 
@@ -127,6 +159,11 @@ end
 local settings          -- current character's data
 local char_name         -- nil until logged in
 local ui                -- texts object
+local talking = false   -- currently in a conversation with a raising NPC
+local talking_since = 0
+local peek = false      -- panel opened by hand while in npc mode
+local debug = false     -- //crt debug: print detection info to chat
+local event_npc = nil   -- name of the NPC the current conversation started with
 
 ------------------------------------------------------------------------
 -- Chat helpers
@@ -375,18 +412,6 @@ local function care_lists()
     return completed, missing
 end
 
-local function daily_care_summary()
-    local completed, missing = care_lists()
-    if #completed == 0 then
-        return 'Nothing logged yet'
-    end
-    if #missing == 0 then
-        return 'All tasks logged'
-    end
-    return 'Done: ' .. table.concat(completed, ', ')
-        .. '\n  Left: ' .. table.concat(missing, ', ')
-end
-
 local function stat_advice()
     local deficits = {}
 
@@ -398,7 +423,7 @@ local function stat_advice()
     end
 
     if #deficits == 0 then
-        return 'Stats meet your targets'
+        return 'All stats meet your targets'
     end
 
     table.sort(deficits, function(a, b) return a.gap > b.gap end)
@@ -410,15 +435,18 @@ end
 local function next_advice()
     local stage = current_stage()
     if stage == 'Egg' then
-        return 'Keep watching the egg until it hatches'
+        if settings.last_watch_date == today() then
+            return 'Watched today - back tomorrow'
+        end
+        return 'Watch the egg today'
     end
     if stage == 'Retired' then
-        return 'Chocobo has passed the tracked age range'
+        return 'Past the tracked age range'
     end
 
     local _, missing = care_lists()
     if #missing > 0 then
-        return 'Log today\'s care: ' .. missing[1]
+        return 'Today\'s care left: ' .. missing[1]
     end
     return stat_advice()
 end
@@ -439,28 +467,166 @@ end
 -- UI
 ------------------------------------------------------------------------
 
-local TEMPLATE = [[
-CarrotTime
-Chocobo: ${c_name}
-Path: ${c_path}   Focus: ${c_focus}
-Age: ${c_age} days (${c_stage})${c_watch}
+local PANEL_WIDTH = 36   -- characters; keeps the rules and bars lined up
 
-Stats (now / target)
-  STR: ${c_str}
-  END: ${c_end}
-  DSC: ${c_dsc}
-  RCP: ${c_rcp}
+-- Colours (r, g, b)
+local C = {
+    title  = {255, 205,  95},   -- chocobo gold
+    text   = {235, 232, 222},
+    label  = {140, 150, 165},
+    dim    = { 85,  90, 100},
+    good   = {125, 215, 125},
+    warn   = {255, 185,  80},
+    gap    = {170, 120,  55},   -- rank still to gain
+    accent = {125, 190, 255},
+}
 
-Abilities: ${c_abil}
-Races: ${c_races}
+local function col(c, s)
+    s = tostring(s)
+    if s == '' then
+        return ''
+    end
+    return string.format('\\cs(%d,%d,%d)%s\\cr', c[1], c[2], c[3], s)
+end
 
-Today's care
-  ${c_care}
+local function pad(s, n)
+    s = tostring(s)
+    if #s >= n then
+        return s
+    end
+    return s .. string.rep(' ', n - #s)
+end
 
-Next: ${c_advice}]]
+local SEP = ' | '
 
-local function stat_line(stat)
-    return string.format('%-3s / %s', settings.stats[stat] or 'F', settings.racing_targets[stat] or 'F')
+local function rule()
+    return col(C.dim, string.rep('-', PANEL_WIDTH))
+end
+
+local function section(name, right)
+    local left = col(C.label, name:upper())
+    if right and right ~= '' then
+        local plain_right = right:gsub('\\cs%(%d+,%d+,%d+%)', ''):gsub('\\cr', '')
+        local space = math.max(1, PANEL_WIDTH - #name - #plain_right)
+        return left .. string.rep(' ', space) .. right
+    end
+    return left
+end
+
+local NEXT_STAGE = {
+    Egg = {4, 'Chick'},
+    Chick = {11, 'Adolescent'},
+    Adolescent = {29, 'Adult'},
+    Adult = {64, 'Retired'},
+}
+
+-- 9-slot bar: '#' = current rank, '-' = still to gain for the target,
+-- '.' = beyond the target.
+local function rank_bar(cur, tgt)
+    local c, t = rank_value(cur), rank_value(tgt)
+    local met = c >= t
+    return col(met and C.good or C.warn, string.rep('#', c))
+        .. col(C.gap, string.rep('-', math.max(0, t - c)))
+        .. col(C.dim, string.rep('.', #RANKS - math.max(c, t)))
+end
+
+local function stat_row(short, stat)
+    local cur = settings.stats[stat] or 'F'
+    local tgt = settings.racing_targets[stat] or 'F'
+    local met = rank_value(cur) >= rank_value(tgt)
+    local status = met and col(C.good, 'ok')
+        or (col(C.label, '-> ') .. col(C.warn, tgt))
+    return col(C.label, short) .. '  '
+        .. col(met and C.good or C.text, pad(cur, 4))
+        .. rank_bar(cur, tgt) .. '  ' .. status
+end
+
+local function build_panel()
+    local lines = {}
+    local function add(l) lines[#lines + 1] = l end
+
+    local stage = current_stage()
+    local age = current_age()
+    local compact = settings.ui.compact
+
+    -- Header: name, path / focus
+    local ver = 'v' .. _addon.version
+    local gap = math.max(2, PANEL_WIDTH - #settings.chocobo_name - #ver)
+    add(col(C.title, settings.chocobo_name) .. string.rep(' ', gap) .. col(C.dim, ver))
+    local path = col(C.text, title_case(settings.chocobo_type))
+    if settings.chocobo_type == 'racing' then
+        path = path .. col(C.dim, SEP) .. col(C.label, settings.racing_focus .. ' focus')
+    end
+    add(path)
+    add(rule())
+
+    -- Age and stage
+    local nxt = NEXT_STAGE[stage]
+    local stage_line = col(C.accent, stage) .. col(C.dim, SEP) .. col(C.text, 'day ' .. age)
+    if nxt then
+        local left = nxt[1] - age
+        stage_line = stage_line .. col(C.dim, SEP)
+            .. col(C.label, nxt[2] .. ' in ' .. left .. 'd')
+    end
+    add(stage_line)
+
+    if stage == 'Egg' then
+        local watched = settings.last_watch_date == today()
+        add(col(C.label, 'Watches ') .. col(C.text, settings.egg_watches or 0)
+            .. col(C.dim, SEP)
+            .. (watched and col(C.good, 'watched today') or col(C.warn, 'not watched today')))
+    end
+
+    -- Stats (not shown for an egg; there's nothing to raise yet)
+    if stage ~= 'Egg' then
+        add('')
+        add(section('Stats', col(C.label, 'now') .. col(C.dim, ' / ') .. col(C.label, 'target')))
+        add(stat_row('STR', 'strength'))
+        add(stat_row('END', 'endurance'))
+        add(stat_row('DSC', 'discernment'))
+        add(stat_row('RCP', 'receptivity'))
+
+        if not compact then
+            -- Today's care
+            local completed = care_lists()
+            local done_count = #completed
+            add('')
+            add(section("Today's care",
+                col(done_count == #CARE_TASKS and C.good or C.text, done_count .. '/' .. #CARE_TASKS)))
+            local words = {}
+            local d = today()
+            for _, task in ipairs(CARE_TASKS) do
+                if settings.care_done[task] == d then
+                    words[#words + 1] = col(C.good, task)
+                else
+                    words[#words + 1] = col(C.dim, task)
+                end
+            end
+            add(table.concat(words, '  '))
+
+            -- Abilities and races
+            add('')
+            local abil = active_abilities()
+            add(col(C.label, pad('Abilities', 10))
+                .. (#abil > 0 and col(C.text, table.concat(abil, ', ')) or col(C.dim, 'none yet')))
+
+            if settings.chocobo_type == 'racing' or #settings.race_history > 0 then
+                local wins, losses = race_totals()
+                if #settings.race_history == 0 then
+                    add(col(C.label, pad('Races', 10)) .. col(C.dim, 'none yet'))
+                else
+                    add(col(C.label, pad('Races', 10)) .. col(C.good, wins .. (wins == 1 and ' win' or ' wins'))
+                        .. '  ' .. col(C.text, losses .. ' other'))
+                end
+            end
+        end
+    end
+
+    -- Next step
+    add(rule())
+    add(col(C.title, '> ') .. col(C.text, next_advice()))
+
+    return table.concat(lines, '\n')
 end
 
 local function update_ui()
@@ -473,30 +639,17 @@ local function update_ui()
         return
     end
 
-    local stage = current_stage()
-    local wins, losses = race_totals()
-
-    ui:update({
-        c_name = settings.chocobo_name,
-        c_path = title_case(settings.chocobo_type),
-        c_focus = settings.racing_focus,
-        c_age = current_age(),
-        c_stage = stage,
-        c_watch = stage == 'Egg' and ('\nEgg watches: ' .. (settings.egg_watches or 0)) or '',
-        c_str = stat_line('strength'),
-        c_end = stat_line('endurance'),
-        c_dsc = stat_line('discernment'),
-        c_rcp = stat_line('receptivity'),
-        c_abil = format_list(active_abilities()),
-        c_races = (#settings.race_history == 0) and 'None'
-            or (wins .. ' won / ' .. losses .. ' other'),
-        c_care = daily_care_summary(),
-        c_advice = next_advice(),
-    })
-
+    ui:text(build_panel())
     ui:pos(settings.ui.x, settings.ui.y)
 
-    if settings.ui.visible then
+    local shown
+    if settings.ui.mode == 'always' then
+        shown = settings.ui.visible
+    else
+        shown = talking or peek
+    end
+
+    if shown then
         ui:show()
     else
         ui:hide()
@@ -504,12 +657,16 @@ local function update_ui()
 end
 
 local function create_ui()
-    ui = texts.new(TEMPLATE, {
+    ui = texts.new('', {
         pos = {x = defaults.ui.x, y = defaults.ui.y},
-        bg = {visible = true, alpha = 180, red = 20, green = 20, blue = 20},
-        text = {font = 'Consolas', size = 10, alpha = 255, red = 255, green = 240, blue = 220},
+        bg = {visible = true, alpha = 210, red = 18, green = 20, blue = 28},
+        text = {
+            font = 'Consolas', size = 10, alpha = 255,
+            red = C.text[1], green = C.text[2], blue = C.text[3],
+            stroke = {width = 1, alpha = 160, red = 0, green = 0, blue = 0},
+        },
         flags = {draggable = true, bold = false, italic = false},
-        padding = 4,
+        padding = 8,
     })
 end
 
@@ -606,6 +763,7 @@ local function set_watches(count)
     -- No number (or "+"): add one watch to the current count.
     if count == nil or count == '' or count == '+' then
         count = (tonumber(settings.egg_watches) or 0) + 1
+        settings.last_watch_date = today()
     end
     count = valid_number(count)
     if not count then
@@ -653,8 +811,9 @@ end
 
 local function show_care()
     local completed, missing = care_lists()
-    say('today (' .. today() .. ') done: ' .. format_list(completed)
-        .. ' | left: ' .. format_list(missing))
+    say('today (' .. today() .. ') done: '
+        .. (#completed > 0 and table.concat(completed, ', ') or 'nothing yet')
+        .. ' | left: ' .. (#missing > 0 and table.concat(missing, ', ') or 'nothing'))
 end
 
 local function log_care(task, undo)
@@ -768,6 +927,10 @@ end
 local capture_until = 0          -- os.time() when capture switches off
 local CAPTURE_MINUTES = 10
 local last_watch_time = 0        -- os.time() of the last auto-counted watch
+local last_watch_line = ''       -- the egg line that was counted (to skip its copy)
+local DUPLICATE_SECONDS = 5      -- same line again this soon = the game's copy
+local watch_prompt_time = 0      -- os.time() Zopago & co. last confirmed a watch
+local WATCH_WINDOW = 120         -- seconds after that line in which an egg line counts
 
 local function capture_path()
     return windower.addon_path .. 'data/capture.txt'
@@ -796,21 +959,160 @@ local function set_capture(arg)
         .. 'watch the egg, then type //crt capture off.')
 end
 
+------------------------------------------------------------------------
+-- NPC conversations: open the panel while talking to a raising NPC
+------------------------------------------------------------------------
+
+local function is_raising_npc(name)
+    if not name or not settings then
+        return false
+    end
+    name = lower(name)
+    for _, n in ipairs(settings.raising_npcs) do
+        if lower(n) == name then
+            return true
+        end
+    end
+    return false
+end
+
+local function set_talking(state)
+    if talking ~= state then
+        talking = state
+        talking_since = os.time()
+        update_ui()
+    end
+end
+
+local function dbg(msg)
+    if debug then
+        windower.add_to_chat(207, '[CarrotTime debug] ' .. msg)
+    end
+end
+
+-- When a conversation (event) starts, remember which NPC it is with.
+windower.register_event('incoming chunk', function(id, data)
+    if not settings then
+        return
+    end
+    if id == 0x032 or id == 0x034 then
+        local ok, p = pcall(packets.parse, 'incoming', data)
+        local mob
+        if ok and p then
+            mob = (p['NPC Index'] and windower.ffxi.get_mob_by_index(p['NPC Index']))
+                or (p['NPC'] and windower.ffxi.get_mob_by_id(p['NPC']))
+        end
+        event_npc = mob and mob.name or nil
+        dbg(string.format('conversation started (0x%03X) with %s', id, tostring(event_npc)))
+    elseif id == 0x00A then
+        event_npc = nil
+        set_talking(false)
+    end
+end)
+
+-- Status 4 = "Event": the game has you in a conversation / cutscene.
+-- The panel shows while you're in one with a raising NPC, and closes
+-- as soon as you aren't. Checked a few times a second.
+local last_poll = 0
+local reported_event = false
+local function poll_conversation()
+    local now = os.clock()
+    if now - last_poll < 0.25 then
+        return
+    end
+    last_poll = now
+
+    local player = windower.ffxi.get_player()
+    local in_event = player and player.status == 4
+
+    if not in_event then
+        if talking then
+            dbg('conversation ended')
+        end
+        event_npc = nil
+        reported_event = false
+        set_talking(false)
+        return
+    end
+
+    if talking then
+        return
+    end
+
+    local target = windower.ffxi.get_mob_by_target('t')
+    local target_name = target and target.name or nil
+    if is_raising_npc(event_npc) or is_raising_npc(target_name) then
+        dbg('raising NPC conversation: ' .. tostring(event_npc or target_name))
+        set_talking(true)
+    elseif debug and not reported_event then
+        dbg('in a conversation, but not with a raising NPC (NPC: '
+            .. tostring(event_npc) .. ', target: ' .. tostring(target_name) .. ')')
+    end
+    reported_event = true
+end
+
 windower.register_event('incoming text', function(original, modified, mode)
-    -- Strip FFXI colour/auto-translate control bytes.
+    -- add_to_chat output comes back through this event; ignore our own lines
+    -- (this is what made the debug messages repeat themselves).
+    local head = tostring(original or ''):sub(1, 40)
+    if head:find('CarrotTime', 1, true) then
+        return
+    end
+
+    -- Strip FFXI colour/auto-translate codes. NPC dialogue uses byte 7 as a
+    -- line break, so control bytes become spaces (not nothing) to keep the
+    -- words apart, then runs of spaces are collapsed.
     local clean = tostring(original or '')
         :gsub('\30.', ''):gsub('\31.', ''):gsub('\127.', '')
-        :gsub('[%z\1-\8\11\12\14-\31]', '')
+        :gsub('[%z\1-\31]', ' ')
+        :gsub('%s+', ' ')
+    local low = clean:lower()
 
-    -- Egg watch: "Your egg feels the tender warmth of your gaze"
-    if settings and clean:lower():find('tender warmth of your gaze', 1, true) then
+    if debug and (low:find('egg', 1, true) or low:find('gaze', 1, true)) then
+        dbg('line (mode ' .. tostring(mode) .. '): ' .. clean)
+    end
+
+    -- "--Chocobo Status Report: Day #12--": set the chocobo's day. Stored as
+    -- a hatch date so the day keeps counting up until the next report.
+    if settings then
+        local day = tonumber(low:match('chocobo status report:%s*day%s*#?%s*(%d+)'))
+        if day then
+            local hatch = os.date('%Y-%m-%d', date_to_time(today()) - day * 86400)
+            if hatch ~= settings.hatch_date then
+                settings.hatch_date = hatch
+                settings.age_days = day
+                save()
+                update_ui()
+                say('status report: day ' .. day .. ' (' .. current_stage() .. ').')
+            end
+        end
+    end
+
+    -- Egg watch. The raising NPC first says "If you watch over <name>, it will
+    -- gradually return your affection." The egg's reaction comes next and
+    -- changes from day to day ("Your egg feels the tender warmth of your
+    -- gaze", "The chick inside the egg seems to want out...", ...), so the
+    -- first egg line after that confirmation counts as one watch. The game
+    -- often prints each line twice (two chat modes); it's only counted once.
+    if settings then
         local now = os.time()
-        if now - last_watch_time > 5 then   -- ignore the same line repeated
+        local npc_speech = clean:match('^%s*[%a][%a%-\' ]* : ') ~= nil
+
+        if low:find('if you watch over', 1, true) then
+            watch_prompt_time = now
+            dbg('watch confirmed by NPC; waiting for the egg\'s reaction')
+        elseif not npc_speech and low:find('egg', 1, true)
+            and now - watch_prompt_time <= WATCH_WINDOW
+            and not (low == last_watch_line and now - last_watch_time <= DUPLICATE_SECONDS) then
             last_watch_time = now
+            last_watch_line = low
+            watch_prompt_time = 0
             settings.egg_watches = (tonumber(settings.egg_watches) or 0) + 1
+            settings.last_watch_date = today()
             save()
             update_ui()
-            say('egg watched - ' .. settings.egg_watches .. ' watches so far.')
+            say('egg watched - ' .. settings.egg_watches
+                .. (settings.egg_watches == 1 and ' watch' or ' watches') .. ' so far.')
         end
     end
 
@@ -833,7 +1135,9 @@ end)
 local function show_help()
     local lines = {
         'CarrotTime commands (//crt):',
-        '  show | hide | toggle | pos <x> <y> | status',
+        '  mode npc|always | show | hide | toggle | compact | pos <x> <y> | status',
+        '  npc | npc add <name> | npc remove <name>   (NPCs that open the panel)',
+        '  debug   (print what the addon detects)',
         '  name <name> | type digging|racing | focus official|circuit|custom',
         '  stat <stat> <rank> | target <stat> <rank>   (str/end/dsc/rcp, F..SSS)',
         '  hatch <YYYY-MM-DD> | age <days> | watch (adds 1) | watches <n>',
@@ -863,16 +1167,82 @@ windower.register_event('addon command', function(command, ...)
     if command == 'help' or command == '' then
         show_help()
     elseif command == 'show' then
-        settings.ui.visible = true
-        save()
+        if settings.ui.mode == 'always' then
+            settings.ui.visible = true
+            save()
+        else
+            peek = true
+        end
         update_ui()
     elseif command == 'hide' then
-        settings.ui.visible = false
+        peek = false
+        if settings.ui.mode == 'always' then
+            settings.ui.visible = false
+            save()
+        end
+        update_ui()
+    elseif command == 'debug' then
+        debug = not debug
+        say('debug ' .. (debug and 'on: talk to the NPC and watch the egg, then send what appears in chat.' or 'off.'))
+    elseif command == 'mode' then
+        local m = lower(args[1])
+        if m ~= 'npc' and m ~= 'always' then
+            say('mode is ' .. settings.ui.mode .. '. Use //crt mode npc or //crt mode always.')
+            return
+        end
+        settings.ui.mode = m
+        peek = false
+        if m == 'always' then
+            settings.ui.visible = true
+        end
         save()
         update_ui()
-    elseif command == 'toggle' then
-        settings.ui.visible = not settings.ui.visible
+        if m == 'npc' then
+            say('the panel now appears only while you talk to '
+                .. table.concat(settings.raising_npcs, ', ') .. '.')
+        else
+            say('the panel now stays on screen.')
+        end
+    elseif command == 'npc' or command == 'npcs' then
+        local sub = lower(args[1])
+        local name = title_case(table.concat(args, ' ', 2))
+        if sub == 'add' and name ~= '' then
+            for _, n in ipairs(settings.raising_npcs) do
+                if lower(n) == lower(name) then
+                    say(name .. ' is already on the list.')
+                    return
+                end
+            end
+            table.insert(settings.raising_npcs, name)
+            save()
+            say(name .. ' added.')
+        elseif sub == 'remove' and name ~= '' then
+            for i, n in ipairs(settings.raising_npcs) do
+                if lower(n) == lower(name) then
+                    table.remove(settings.raising_npcs, i)
+                    save()
+                    say(name .. ' removed.')
+                    return
+                end
+            end
+            err(name .. ' is not on the list.')
+        elseif sub == '' then
+            say('panel opens for: ' .. format_list(settings.raising_npcs))
+        else
+            err('usage: //crt npc | npc add <name> | npc remove <name>')
+        end
+    elseif command == 'compact' then
+        settings.ui.compact = not settings.ui.compact
         save()
+        update_ui()
+        say('compact view ' .. (settings.ui.compact and 'on' or 'off') .. '.')
+    elseif command == 'toggle' then
+        if settings.ui.mode == 'always' then
+            settings.ui.visible = not settings.ui.visible
+            save()
+        else
+            peek = not peek
+        end
         update_ui()
     elseif command == 'pos' then
         local x, y = tonumber(args[1]), tonumber(args[2])
@@ -944,10 +1314,13 @@ local function load_character()
     settings = load_data(char_name)
     save()  -- writes the file the first time, and fills in any new defaults
     update_ui()
+    say('v' .. _addon.version .. ' loaded for ' .. char_name .. ' ('
+        .. settings.ui.mode .. ' mode).')
 end
 
 local function unload_character()
     save()
+    talking, peek = false, false
     char_name = nil
     settings = nil
     update_ui()
@@ -989,6 +1362,9 @@ end)
 -- Refresh every 30 s so age and today's care roll over at midnight.
 local last_refresh = 0
 windower.register_event('prerender', function()
+    if settings then
+        poll_conversation()
+    end
     local now = os.clock()
     if now - last_refresh >= 30 then
         last_refresh = now
