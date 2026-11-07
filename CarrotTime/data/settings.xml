@@ -1,0 +1,49 @@
+<?xml version="1.1" ?>
+<settings>
+    <global>
+        <abilities>
+
+        </abilities>
+        <age_days>0</age_days>
+        <care_done>
+
+        </care_done>
+        <care_notes>
+
+        </care_notes>
+        <chocobo_name>My Chocobo</chocobo_name>
+        <chocobo_type>digging</chocobo_type>
+        <egg_watches>0</egg_watches>
+        <hatch_date />
+        <notes>
+
+        </notes>
+        <race_history>
+
+        </race_history>
+        <racing_focus>official</racing_focus>
+        <racing_targets>
+            <discernment>A</discernment>
+            <endurance>B</endurance>
+            <receptivity>C</receptivity>
+            <strength>SS</strength>
+        </racing_targets>
+        <stats>
+            <discernment>F</discernment>
+            <endurance>F</endurance>
+            <receptivity>F</receptivity>
+            <strength>F</strength>
+        </stats>
+        <stories>
+
+        </stories>
+        <ui>
+            <visible>true</visible>
+            <x>200</x>
+            <y>200</y>
+        </ui>
+    </global>
+    <valdimar>
+        <egg_watches>111</egg_watches>
+    </valdimar>
+</settings>
