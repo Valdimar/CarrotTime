@@ -4,7 +4,7 @@ A chocobo raising assistant for **Windower 4**. A panel that appears while you t
 NPC (Hantileon, Zopago or Pulonono) and tracks your chocobo's day, stats, care, food, stories and
 conditions, with a built-in raising guide for a digger built off a racing-stat base.
 
-**Author:** Valdimar @ Phoenix  **Version:** 3.2  **Commands:** `//crt`, `//carrottime`
+**Author:** Valdimar @ Phoenix  **Version:** 3.3  **Commands:** `//crt`, `//carrottime`
 
 > Status: tested against a recorded play session and simulated game data, not every feature live in
 > game. If something isn't counted, turn on `//crt debug` (see below) and send the log.
@@ -17,7 +17,7 @@ conditions, with a built-in raising guide for a digger built off a racing-stat b
 3. Talk to your raising NPC. Chat shows:
 
    ```
-   [CarrotTime] Author: Valdimar @ Phoenix v3.2
+   [CarrotTime] Author: Valdimar @ Phoenix v3.3
    [CarrotTime] Loaded profile for Valdimar (npc mode).
    ```
 
@@ -25,15 +25,18 @@ conditions, with a built-in raising guide for a digger built off a racing-stat b
 
 ## Update check
 
-A few seconds after you log in, CarrotTime checks GitHub once for a newer version. If there is one,
-chat says so:
+A few seconds after you log in, CarrotTime checks GitHub once and always says the result in chat:
 
 ```
-[CarrotTime] Version X.Y is out (you have 3.2). Get it from github.com/Valdimar/CarrotTime
+[CarrotTime] Up to date (version 3.3).
+[CarrotTime] UPDATE AVAILABLE: version X.Y is out (you have 3.3). Get it from github.com/Valdimar/CarrotTime
+[CarrotTime] Version 3.3 is newer than GitHub (X.Y), so it hasn't been released yet.
+[CarrotTime] Couldn't check for updates (GitHub didn't answer). Try again with a reload.
 ```
 
-It only speaks up when GitHub has a newer version, and stays quiet if GitHub can't be reached.
-The game can pause for a moment while it checks (at most 3 seconds, usually much less).
+An available update is shown in a different colour so it stands out. If the game has no HTTPS
+support, it says it couldn't check. The game can pause for a moment while it checks (at most 3
+seconds, usually much less). `//lua reload CarrotTime` checks again.
 
 ## The panel
 

@@ -2,9 +2,14 @@
     CarrotTime
     Windower 4 Chocobo Raising Assistant
     Author: Valdimar @ Phoenix
-    Version: 3.1
+    Version: 3.3
 
     Changelog
+      v3.3  The update check always says its result in chat when the addon
+            loads: up to date, UPDATE AVAILABLE (in a different colour),
+            newer than GitHub (not released yet), or couldn't check.
+      v3.2  Update check (update_check.lua): a few seconds after login it
+            checks GitHub for a newer version.
       v3.1  Care plans: the plan in use is read from the check-up
             ("Plan: Basic Care", right after the status report), so the
             panel's Set line fills in by itself. From the chick stage on, a
@@ -250,7 +255,7 @@
 
 _addon.name = 'CarrotTime'
 _addon.author = 'Valdimar @ Phoenix'
-_addon.version = '3.2'
+_addon.version = '3.3'
 _addon.commands = {'crt', 'carrottime'}
 
 -- Says in chat when a newer version is on GitHub (once per load; see update_check.lua)

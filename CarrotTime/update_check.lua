@@ -13,9 +13,13 @@ The addon's main file starts it once:
 `url` is the addon's main file on GitHub. The check reads `_addon.version` from it, so
 pushing a new version to GitHub is all it takes for everyone else to be told about it.
 
-It checks once per load, a few seconds after you're logged in, and only says something
-when the version on GitHub is NEWER than the one installed. If GitHub can't be reached
-it stays quiet. `//lua reload` the addon to check again.
+It checks once per load, a few seconds after you're logged in, and always says the result
+in chat:
+  - Up to date (version X)
+  - UPDATE AVAILABLE: version X is out (in a different colour, 167)
+  - Version X is newer than GitHub (not released yet)
+  - Couldn't check for updates (no HTTPS support, or GitHub didn't answer)
+`//lua reload` the addon to check again.
 ]]
 
 local M = {}
@@ -47,17 +51,30 @@ function M.check(opts)
     if checked then return end
     checked = true
 
+    local function say(color, text)
+        windower.add_to_chat(color, ('[%s] %s'):format(opts.name, text))
+    end
+
     local ok, https = pcall(require, 'ssl.https')
-    if not ok then return end
+    if not ok then
+        say(M.color, "Couldn't check for updates (no HTTPS support).")
+        return
+    end
     https.TIMEOUT = M.timeout
 
     local ok2, body, code = pcall(https.request, opts.url)
-    if not ok2 or code ~= 200 or type(body) ~= 'string' then return end
-
-    local latest = body:match('_addon%.version%s*=%s*[\'"]([^\'"]+)[\'"]')
-    if latest and M.is_newer(latest, opts.version) then
-        windower.add_to_chat(M.color, ('[%s] Version %s is out (you have %s). Get it from %s')
-            :format(opts.name, latest, opts.version, opts.page))
+    local latest = ok2 and code == 200 and type(body) == 'string'
+        and body:match('_addon%.version%s*=%s*[\'"]([^\'"]+)[\'"]')
+    if not latest then
+        say(M.color, "Couldn't check for updates (GitHub didn't answer). Try again with a reload.")
+    elseif M.is_newer(latest, opts.version) then
+        say(167, ('UPDATE AVAILABLE: version %s is out (you have %s). Get it from %s')
+            :format(latest, opts.version, opts.page))
+    elseif M.is_newer(opts.version, latest) then
+        say(M.color, ('Version %s is newer than GitHub (%s), so it hasn\'t been released yet.')
+            :format(opts.version, latest))
+    else
+        say(M.color, ('Up to date (version %s).'):format(opts.version))
     end
 end
 
