@@ -250,8 +250,16 @@
 
 _addon.name = 'CarrotTime'
 _addon.author = 'Valdimar @ Phoenix'
-_addon.version = '3.1'
+_addon.version = '3.2'
 _addon.commands = {'crt', 'carrottime'}
+
+-- Says in chat when a newer version is on GitHub (once per load; see update_check.lua)
+require('update_check').start({
+    name    = 'CarrotTime',
+    version = _addon.version,
+    url     = 'https://raw.githubusercontent.com/Valdimar/CarrotTime/main/CarrotTime/CarrotTime.lua',
+    page    = 'github.com/Valdimar/CarrotTime',
+})
 
 -- Windower libraries: texts draws the panel, packets reads NPC menu / trade packets.
 local texts = require('texts')
