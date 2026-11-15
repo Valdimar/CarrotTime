@@ -1,211 +1,149 @@
 # CarrotTime
 
-**CarrotTime** is a Windower 4 addon for tracking and planning Final Fantasy XI chocobo raising.
+A chocobo raising assistant for **Windower 4**. A panel that appears while you talk to your raising
+NPC (Hantileon, Zopago or Pulonono) and tracks your chocobo's day, stats, care, food, stories and
+conditions, with a built-in raising guide for a digger built off a racing-stat base.
 
-It helps players keep track of their chocobo’s age, development path, stats, care tasks, abilities, egg-phase watches, and racing results.
+**Author:** Valdimar @ Phoenix  **Version:** 3.1  **Commands:** `//crt`, `//carrottime`
 
-> **Version:** 0.4.0  
-> **Addon command:** `//crt`
+> Status: tested against a recorded play session and simulated game data, not every feature live in
+> game. If something isn't counted, turn on `//crt debug` (see below) and send the log.
 
-## Features
+## Install
 
-- **Digging and racing paths**
-  - Digging: track the Bore and Burrow goals.
-  - Racing: track Gallop and Canter goals.
-- **Chocobo age and stage tracking**
-  - Set the hatch date or enter the current age manually.
-- **Egg-phase watch tracking**
-  - Enter the number of watches performed during the egg phase.
-- **Stat tracking**
-  - Record Strength, Endurance, Discernment, and Receptivity ranks.
-- **Racing target advisor**
-  - Configure target ranks for each stat.
-  - Review which stat is furthest from its configured target.
-- **Race history**
-  - Record wins, losses, and finishing places.
-- **Daily care checklist**
-  - Log care tasks for the current day.
-- **Notes**
-  - Save reminders and observations.
-- **On-screen display**
-  - View your chocobo’s profile and current tracking information.
+1. Unzip `CarrotTime-v<version>.zip` into `Windower4/addons/`. You get `addons/CarrotTime/`.
+2. In game: `//lua load CarrotTime`. To load it every time, add `lua load CarrotTime` to
+   `Windower4/scripts/init.txt`.
+3. Talk to your raising NPC. Chat shows:
 
-## Installation
-
-1. Install [Windower 4](https://www.windower.net/) and ensure the Lua addon support is enabled.
-2. Create a folder named `CarrotTime` inside your Windower addons directory.
-3. Save `CarrotTime.lua` inside that folder.
-4. In-game, load the addon:
-
-   ```text
-   //lua load CarrotTime
+   ```
+   [CarrotTime] Author: Valdimar @ Phoenix v3.1
+   [CarrotTime] Loaded profile for Valdimar (npc mode).
    ```
 
-5. View the available commands:
+**Updating:** unzip over the old copy and run `//crt reload`. Your data in `data/` is kept.
 
-   ```text
-   //crt help
-   ```
+## The panel
+
+The panel opens when a conversation with a raising NPC starts and closes when it ends (or when you
+zone). `//crt show` / `//crt hide` open or close it by hand; `//crt mode always` keeps it on screen.
+It's always 45 characters wide; long text wraps.
+
+| Section | Shows |
+| --- | --- |
+| Header | Chocobo name, version, stage, day, days to the next stage |
+| Energy | Energy 0-100 with a bar, walks and watches left (`~` = estimated since the last reading) |
+| Food / Likes / Status | Food level from the check-up, feedings today, liked day type, conditions with their cure |
+| Stats | Each stat as `Poor \| F` with a bar towards its target; `^` / `v` marks a rank change in the last 2 days |
+| Today's care | Chick: walks until out of energy, then watches until out of energy. Older: walks |
+| Plan | Guide phase, care plan to use, the goal, what to do daily, what's next, and the plan you set |
+| Abilities / Stories | Learned abilities, stories you hold (Burrow / Bore marked skip), walk friends |
+| Lost chick | Clues so far and who the owner can still be, with map positions |
+| Racing | Exact stat values from your chocobo card, riding speed and time, race record |
+| `>` line | The next thing to do: a cure, walks, watches, carrots, the plan |
+
+Days follow the game's reset: Japanese midnight (10 AM Eastern standard time).
+
+## What's counted automatically
+
+| Thing | How |
+| --- | --- |
+| Day | `--Chocobo Status Report: Day #--`; counts up daily between visits |
+| Care plan | `Plan: Basic Care` (right after the status report); `//crt careplan` still sets it by hand |
+| Name | `Let's see how <name> is doing today` |
+| Food level / likes | `Hmmm... Your chocobo seems to be ...` / `Your chocobo likes ...` |
+| Stats | `Strength: Poor` and the other three lines (Poor F, Substandard E, A bit deficient D, Average C, Better than average B, Impressive A, Outstanding S, First-Class SS) |
+| Abilities | `Last of all, your animal ...` |
+| Conditions | Key words in the check-up (Happiness, Stomachache, Injured, Spoiled, ...) |
+| Walks / watches | The game's result data for each walk or watch (works at any trainer). Fallbacks: the walk menu choice, and the line after `If you watch over ...` |
+| Out of energy | `... needs more energy before you can take care of it.` |
+| Energy | The trainer's menu data (exact value); walk / watch results (energy before and after, or refused) |
+| Feedings | `<you> gives the chocobo a <food>.` (all greens, carrots, pastes, wildgrass, worms, Chocolixirs, salads, Potion, Chocotonic) |
+| Stories | `Obtained key item: Story of ...` |
+| Walk finds / friends | `found this on one of your walks` / `getting along well with <friend>` |
+| Lost chick clues | The trainer's clues on short walks |
+| Card values | A VCS registration card, racing form or chococard in your inventory |
+
+Scolds and story-telling aren't detected yet: use `//crt scold`.
+
+## Energy
+
+Read from the trainer's menu data every time the menu opens. From Valdimar's logs:
+
+- Energy runs 0-100. A walk uses about 23-24, a watch about 3-4.
+- A walk needs more than 27 energy (refused at 24 and 27, went through at 47). The addon learns
+  these limits from your chocobo's results.
+- Energy **does not refill at the daily reset**: it recovers about 1.4 an hour. Spending it all on
+  watches leaves too little for walks the next day.
+- Between visits the panel estimates energy from the measured recovery rate (shown with `~`).
+
+`//crt energy` shows the current value, walks / watches left, the learned limits and recovery rate,
+and how long until there's enough for a walk.
+
+## Raising guide
+
+A digger built off a racing-stat base, in 4 phases. The phase moves on by itself.
+
+| Phase | Goal | Care |
+| --- | --- | --- |
+| 1. Build STR/END | STR and END Outstanding (S, 192+) | Take a Walk (chick), Carry Packages, then whichever of STR/END is behind. 3 Vomp Carrots and walks daily (skip the carrots on a "completely full" day) |
+| 2. Trade STR/END for DSC/RCP | DSC Average (C, 96+) | Register at the racing stables, then Exhibit to the Public (Listen to Music as a chick) |
+| 3. Learn abilities | 2 abilities | Basic Care. Tell the diligent story (Treasure Finder) and the second ability's story (Canter by default). Never tell the worrisome (Burrow) or youthful (Bore) stories |
+| 4. Raise END/RCP | As high as possible | Exercise in a Group or Act in a Play, whichever of END/RCP is lower |
+
+From the chick stage on, always have a stat care plan set at the trainer: plans raise stats every
+day without food, and Basic Care gives none (phase 3 uses it on purpose). The next step flags a plan
+that doesn't match the guide before the carrot reminder. Care plans are said to stop changing stats
+around day 65. `//crt guide` prints the full plan.
 
 ## Commands
 
-### General
+| Command | Does |
+| --- | --- |
+| `help` / `reload` | List commands / save and reload |
+| `show` / `hide` / `toggle` / `mode npc\|always` / `compact` / `pos <x> <y>` | Panel |
+| `npc [add\|remove <name>]` | NPCs that open the panel |
+| `status` / `care` / `energy` | Summary / today's care and time to the reset / energy, walks and watches left |
+| `watch` / `watches <n>` / `scold` / `walk [n]` / `undo watch\|scold\|walk [n]` | Care by hand |
+| `feed` / `feed <food> [n]` / `unfeed <food> [n]` | Feedings (`feed vomp 3`) |
+| `stat <stat> <rank>` / `target <stat> <rank>` | Stats by hand (`stat str average`) |
+| `age <days>` / `hatch <YYYY-MM-DD>` / `name <name>` | Day and name by hand |
+| `ability <name> [off]` | Abilities by hand |
+| `guide [on\|off]` / `guide phase <1-4>` / `guide ability canter\|gallop\|auto-regen` | Raising guide |
+| `careplan [plan] [days]` | The care plan you set at the trainer |
+| `stories` / `story <name> [off]` | All stories and how to get them / record one |
+| `conditions` | Every condition, its effect and cure |
+| `chick` / `chick <clue>` / `chick reset\|done` | Lost chocobo chick quest |
+| `finds` / `friends` | Walk finds / walk friends (3 meetings = a story) |
+| `history` / `export` | Rank changes by day / daily history to `data/<Character>_history.csv` |
+| `card [n]` / `paddock` | Chocobo card values / the chocobo you're viewing in the paddocks |
+| `race win\|loss\|place <n>` / `race history` | Race record |
+| `reminder on\|off` | Reminder in your trainer's town when today's care isn't done |
+| `note <text>` / `notes [clear]` | Notes |
+| `chatcolor <n>` | Colour of the load message (207) |
+| `debug [on\|off]` | Record everything to `data/debug/` |
+| `reset confirm` | Wipe this character's chocobo data |
 
-| Command | Description |
-|---|---|
-| `//crt` | Show the current chocobo profile |
-| `//crt help` | Display the command list |
-| `//crt show` | Show the CarrotTime display |
-| `//crt hide` | Hide the CarrotTime display |
-| `//crt reset` | Reset the saved profile |
+## Debug logs
 
-### Chocobo profile
+If something isn't counted: `//crt debug on`, do it in game, `//crt debug off`, and send the file
+named in chat from `addons/CarrotTime/data/debug/`. It records every chat line (with hidden bytes),
+NPC conversation starts and ends, menu choices, trades, status changes and what the addon counted.
 
-| Command | Description |
-|---|---|
-| `//crt type digging` | Set the chocobo path to digging |
-| `//crt type racing` | Set the chocobo path to racing |
-| `//crt hatch YYYY-MM-DD` | Set the hatch date |
-| `//crt age <days>` | Set the age manually |
-| `//crt watches <number>` | Record the number of egg-phase watches |
+## Files
 
-Examples:
+| File | Holds |
+| --- | --- |
+| `data/<Character>.lua` | That character's chocobo, care, history and settings |
+| `data/<Character>_history.csv` | Written by `//crt export` |
+| `data/debug/<date_time>.txt` | Debug logs |
 
-```text
-//crt hatch 2026-11-02
-//crt age 12
-//crt watches 3
-```
+## Credits
 
-The watch counter is intended for use during the egg phase.
-
-### Stats and racing targets
-
-Record a current stat rank:
-
-```text
-//crt stat strength A
-//crt stat endurance B
-//crt stat discernment A
-//crt stat receptivity C
-```
-
-Configure a target rank:
-
-```text
-//crt target strength SS
-//crt target endurance B
-//crt target discernment A
-//crt target receptivity C
-```
-
-Supported stat names:
-
-- `strength`
-- `endurance`
-- `discernment`
-- `receptivity`
-
-Supported ranks:
-
-`F`, `E`, `D`, `C`, `B`, `A`, `S`, `SS`, `SSS`
-
-### Racing focus
-
-Choose a racing focus:
-
-```text
-//crt focus official
-//crt focus circuit
-//crt focus custom
-```
-
-The focus is recorded with race results and can be used to distinguish the type of racing plan being tracked.
-
-### Care tracking
-
-Log a daily care task:
-
-```text
-//crt care feed
-//crt care exercise
-//crt care outing
-//crt care care
-//crt care story
-```
-
-`//crt done <task>` is an alias for `//crt care <task>`.
-
-Supported tasks:
-
-- `feed`
-- `exercise`
-- `outing`
-- `care`
-- `story`
-
-### Race history
-
-Record a race result:
-
-```text
-//crt race win
-//crt race loss
-//crt race place 2
-```
-
-View recorded race results:
-
-```text
-//crt race history
-```
-
-### Notes
-
-Save a note:
-
-```text
-//crt note Try a different feeding plan tomorrow.
-```
-
-## Chocobo paths
-
-### Digging
-
-The digging path is intended for players working toward the **Bore** and **Burrow** abilities.
-
-CarrotTime can track the selected path and recorded abilities. It does not automatically determine whether an in-game ability has been learned.
-
-### Racing
-
-The racing path is intended for players working toward **Gallop** and **Canter**.
-
-Racing stat targets can be adjusted to suit the player's plan. The default targets are configurable and should be treated as a planning reference, not a guarantee of race performance.
-
-## Data and persistence
-
-CarrotTime uses Windower’s configuration system to save its tracking information.
-
-Saved information includes:
-
-- Chocobo path and age
-- Egg-phase watch count
-- Recorded stats and abilities
-- Racing targets and focus
-- Race history
-- Daily care tasks
-- Notes
-
-The addon is a manual tracker. It does not automatically inspect chocobo status, care events, or race outcomes from the game client. Players enter this information using commands.
-
-## Compatibility
-
-- **Game:** Final Fantasy XI
-- **Addon framework:** Windower 4
-- **Language:** Lua
-
-## Disclaimer
-
-CarrotTime is an unofficial community addon and should be used at your own risk.
-
-Use it as a personal tracking and planning tool. Chocobo raising outcomes depend on in-game mechanics and player actions.
+- Chocobo card / paddock layout and riding formulas from Ivaar's
+  [chococard](https://github.com/Ivaar/Windower-addons/tree/master/chococard) addon
+  (independent implementation).
+- Story and condition lists from Valdimar; lost chick owners from the
+  [BG-Wiki](https://www.bg-wiki.com/ffxi/Lost_Chocobo_Chick_Mini-Quest) page plus Valdimar's map
+  positions.
+- Raising and care plan information from FFXIclopedia, BG-Wiki, FFXIAH, FFXIOnline and Allakhazam.
