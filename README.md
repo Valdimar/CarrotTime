@@ -4,7 +4,7 @@ A chocobo raising assistant for **Windower 4**. A panel that appears while you t
 NPC (Hantileon, Zopago or Pulonono) and tracks your chocobo's day, stats, care, food, stories and
 conditions, with a built-in raising guide for a digger built off a racing-stat base.
 
-**Author:** Valdimar @ Phoenix  **Version:** 3.3  **Commands:** `//crt`, `//carrottime`
+**Author:** Valdimar @ Phoenix  **Version:** 3.4  **Commands:** `//crt`, `//carrottime`
 
 > Status: tested against a recorded play session and simulated game data, not every feature live in
 > game. If something isn't counted, turn on `//crt debug` (see below) and send the log.
@@ -17,7 +17,7 @@ conditions, with a built-in raising guide for a digger built off a racing-stat b
 3. Talk to your raising NPC. Chat shows:
 
    ```
-   [CarrotTime] Author: Valdimar @ Phoenix v3.3
+   [CarrotTime] Author: Valdimar @ Phoenix v3.4
    [CarrotTime] Loaded profile for Valdimar (npc mode).
    ```
 
@@ -28,9 +28,9 @@ conditions, with a built-in raising guide for a digger built off a racing-stat b
 A few seconds after you log in, CarrotTime checks GitHub once and always says the result in chat:
 
 ```
-[CarrotTime] Up to date (version 3.3).
-[CarrotTime] UPDATE AVAILABLE: version X.Y is out (you have 3.3). Get it from github.com/Valdimar/CarrotTime
-[CarrotTime] Version 3.3 is newer than GitHub (X.Y), so it hasn't been released yet.
+[CarrotTime] Up to date (version 3.4).
+[CarrotTime] UPDATE AVAILABLE: version X.Y is out (you have 3.4). Get it from github.com/Valdimar/CarrotTime
+[CarrotTime] Version 3.4 is newer than GitHub (X.Y), so it hasn't been released yet.
 [CarrotTime] Couldn't check for updates (GitHub didn't answer). Try again with a reload.
 ```
 
@@ -73,7 +73,7 @@ Days follow the game's reset: Japanese midnight (10 AM Eastern standard time).
 | Walks / watches | The game's result data for each walk or watch (works at any trainer). Fallbacks: the walk menu choice, and the line after `If you watch over ...` |
 | Out of energy | `... needs more energy before you can take care of it.` |
 | Energy | The trainer's menu data (exact value); walk / watch results (energy before and after, or refused) |
-| Feedings | `<you> gives the chocobo a <food>.` (all greens, carrots, pastes, wildgrass, worms, Chocolixirs, salads, Potion, Chocotonic) |
+| Feedings | `<you> gives the chocobo a <food>.` (all greens, carrots, pastes, wildgrass, worms, Chocolixirs, salads, Potion, Chocotonic, including names like `a bunch of gysahl greens` or `a ball of herb paste`). If you trade a food to the trainer and the conversation ends with no such line (a cure for a sick chick, say), it's counted from the trade |
 | Stories | `Obtained key item: Story of ...` |
 | Walk finds / friends | `found this on one of your walks` / `getting along well with <friend>` |
 | Lost chick clues | The trainer's clues on short walks |

@@ -2,9 +2,14 @@
     CarrotTime
     Windower 4 Chocobo Raising Assistant
     Author: Valdimar @ Phoenix
-    Version: 3.3
+    Version: 3.4
 
     Changelog
+      v3.4  Feedings: greens, pastes and wildgrass are counted (the game names
+            them "a bunch of gysahl greens", "a ball of herb paste", "a clump
+            of Tokopekko wildgrass"). If a food is traded to the trainer and
+            the conversation ends with no feeding line for it (e.g. a cure
+            for a sick chick), the feeding is counted from the trade.
       v3.3  The update check always says its result in chat when the addon
             loads: up to date, UPDATE AVAILABLE (in a different colour),
             newer than GitHub (not released yet), or couldn't check.
@@ -255,7 +260,7 @@
 
 _addon.name = 'CarrotTime'
 _addon.author = 'Valdimar @ Phoenix'
-_addon.version = '3.3'
+_addon.version = '3.4'
 _addon.commands = {'crt', 'carrottime'}
 
 -- Says in chat when a newer version is on GitHub (once per load; see update_check.lua)
@@ -742,13 +747,34 @@ for _, f in ipairs(FOODS) do
     FOOD_BY_LOWER[f:lower()] = f
 end
 
+-- Food names, longest first, so "hi-chocolixir" is found before "chocolixir".
+local FOODS_LONGEST = {}
+for _, f in ipairs(FOODS) do
+    FOODS_LONGEST[#FOODS_LONGEST + 1] = f
+end
+table.sort(FOODS_LONGEST, function(a, b) return #a > #b end)
+
+-- Find a food named anywhere in chat text. The game uses item log names, which
+-- can have a measure word in front ("a bunch of gysahl greens", "a ball of herb
+-- paste", "a clump of Tokopekko wildgrass") or be plural ("3 Vomp carrots").
+-- Returns the food and how many (a leading number, else 1).
+function FOOD_BY_LOWER.find_in(text)
+    local low = tostring(text or ''):lower()
+    for _, f in ipairs(FOODS_LONGEST) do
+        if low:find(f:lower(), 1, true) then
+            return f, tonumber(low:match('^%s*(%d+)%s')) or 1
+        end
+    end
+    return nil
+end
+
 -- Match typed text ("vomp", "azouph greens") to a food name.
 local function find_food(text)
     text = tostring(text or ''):lower():gsub('^%s+', ''):gsub('%s+$', '')
     if text == '' then
         return nil
     end
-    if FOOD_BY_LOWER[text] then
+    if type(FOOD_BY_LOWER[text]) == 'string' then
         return FOOD_BY_LOWER[text]
     end
     for _, f in ipairs(FOODS) do
@@ -2631,6 +2657,7 @@ end
 local last_watch_time = 0        -- os.time() of the last auto-counted watch
 local last_watch_line = ''       -- the egg line that was counted (to skip its copy)
 local last_feed_line, last_feed_time = '', 0      -- last feeding line counted (to skip its copies)
+local pending_trade = nil       -- {foods = {[food] = n}, time}: food traded to the trainer, waiting for its feeding line
 local checkup_start = 0          -- os.time() the last check-up began
 local walk_find_time = 0         -- os.time() the trainer said the chocobo found something
 local last_find_line, last_find_time = '', 0      -- last walk find counted (to skip its copies)
@@ -2837,10 +2864,20 @@ windower.register_event('outgoing chunk', function(id, data)
         if idx and idx > 0 and cnt and cnt > 0 then
             local item = windower.ffxi.get_items(0, idx)
             local name = item and item.id and item.id > 0 and item_name(item.id) or ''
-            local food = FOOD_BY_LOWER[name:lower()]
-            -- Not counted here: the game can send this packet twice per item.
-            -- Feedings are counted from the "gives the chocobo" line instead.
+            local res_ok, res = pcall(require, 'resources')
+            local log_name = res_ok and res and res.items and res.items[item.id] and res.items[item.id].enl
+            local food = FOOD_BY_LOWER.find_in(name) or FOOD_BY_LOWER.find_in(log_name)
             dbg('trade to ' .. npc.name .. ': ' .. cnt .. 'x ' .. name .. (food and ' (food)' or ''))
+            -- Not counted straight away: the game can send this packet twice
+            -- per item, and the "gives the chocobo" line (about 15 seconds
+            -- later, after the trainer's dialogue) is the usual count. If the
+            -- conversation ends with no feeding line for it (a sick chick's
+            -- cure, say), it's counted from the trade (count_pending_trade).
+            if food then
+                pending_trade = pending_trade or {foods = {}}
+                pending_trade.foods[food] = cnt     -- a repeated packet overwrites, not adds
+                pending_trade.time = os.time()
+            end
         end
     end
 end)
@@ -3009,6 +3046,22 @@ local last_poll = 0             -- os.clock() of the last check (checked 4 times
 local last_status = nil         -- player status at the last check (for the debug log)
 local last_target_hpp = nil     -- debug: the chocobo's target-bar % last logged
 local reported_event = false    -- debug: already logged "not a raising NPC" for this event
+-- Foods traded to the trainer that never got a "gives the chocobo" line: once the
+-- conversation is over (and at least 5 seconds after the trade, so it has had time
+-- to start), count them from the trade.
+local function count_pending_trade()
+    if not pending_trade or os.time() - pending_trade.time < 5 then
+        return
+    end
+    local foods = pending_trade.foods
+    pending_trade = nil
+    for food, n in pairs(foods) do
+        record_food(food, n)
+        say('fed ' .. n .. 'x ' .. food .. ' (from the trade) - ' .. fed_count()
+            .. ' today. If it didn\'t eat it: //crt unfeed ' .. food:lower() .. ' ' .. n)
+    end
+end
+
 -- Called every frame (a few times a second at most): opens the panel when you're in a
 -- conversation (status 4) with a raising NPC, closes it when the conversation ends,
 -- and confirms pending walks.
@@ -3047,6 +3100,7 @@ local function poll_conversation()
         event_npc = nil
         reported_event = false
         set_talking(false)
+        count_pending_trade()
         return
     end
 
@@ -3267,14 +3321,18 @@ windower.register_event('incoming text', function(original, modified, mode)
     -- "Valdimar gives the chocobo a Vomp carrot." - count one feeding.
     -- (The game prints the line more than once; copies are skipped.)
     if settings then
+        -- Log names can have a measure word ("a bunch of gysahl greens",
+        -- "a ball of herb paste", "a clump of Tokopekko wildgrass").
         local given = clean:match('gives the chocobo (.-)[%s%.!]*$')
+            or clean:match('gives (.-) to the chocobo')
         if given then
-            local n = tonumber(given:match('^(%d+)%s')) or 1
-            given = given:gsub('^%d+%s+', ''):gsub('^an?%s+', ''):gsub('^some%s+', ''):gsub('^the%s+', '')
-            local food = FOOD_BY_LOWER[given:lower()] or FOOD_BY_LOWER[given:lower():gsub('s$', '')]
+            local food, n = FOOD_BY_LOWER.find_in(given)
             local now = os.time()
             if food and not (low == last_feed_line and now - last_feed_time <= DUPLICATE_SECONDS) then
                 last_feed_line, last_feed_time = low, now
+                if pending_trade then   -- the trade's backup count isn't needed for this food
+                    pending_trade.foods[food] = nil
+                end
                 local was_full = full_today()
                 record_food(food, n)
                 say('fed ' .. n .. 'x ' .. food .. ' - ' .. fed_count() .. ' today.')
