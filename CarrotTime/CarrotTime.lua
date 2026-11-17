@@ -2,9 +2,14 @@
     CarrotTime
     Windower 4 Chocobo Raising Assistant
     Author: Valdimar @ Phoenix
-    Version: 3.4
+    Version: 3.5
 
     Changelog
+      v3.5  //crt food <name> says what a food does for the chocobo (stats,
+            affection, energy, cures, notes, and where it fits the raising
+            plan). //crt food lists every food; //crt food inv lists the ones
+            you're carrying. Lethe Potage and Lethe Consomme (they remove
+            learned abilities) are now known foods.
       v3.4  Feedings: greens, pastes and wildgrass are counted (the game names
             them "a bunch of gysahl greens", "a ball of herb paste", "a clump
             of Tokopekko wildgrass"). If a food is traded to the trainer and
@@ -217,6 +222,8 @@
       //crt feed                      Today's feedings (counted from trades)
       //crt feed <food> [n]           Add a feeding by hand (e.g. feed vomp 3)
       //crt unfeed <food> [n]         Take one back
+      //crt food [name|inv]           What a food does (vomp, zegham, celerity,
+                                      ...); inv = the foods you're carrying
       //crt scold                     Log a scold (Chick stage)
       //crt walk                      Log a short walk (Chick stage, 3 a day)
       //crt undo watch|scold|walk [n] Take one (or n) back off today
@@ -260,7 +267,7 @@
 
 _addon.name = 'CarrotTime'
 _addon.author = 'Valdimar @ Phoenix'
-_addon.version = '3.4'
+_addon.version = '3.5'
 _addon.commands = {'crt', 'carrottime'}
 
 -- Says in chat when a newer version is on GitHub (once per load; see update_check.lua)
@@ -739,7 +746,7 @@ local FOODS = {
     'Gausebit Wildgrass', 'Tokopekko Wildgrass', 'Garidav Wildgrass',  -- medicine
     'Cupid Worm', 'Gregarious Worm', 'Parasite Worm',                  -- worms
     'Chocolixir', 'Hi-Chocolixir', 'Celerity Salad', 'Tornado Salad',  -- energy / cures
-    'Potion', 'Chocotonic',
+    'Potion', 'Chocotonic', 'Lethe Potage', 'Lethe Consomme',
 }
 -- Lower-case food name -> proper name, for matching chat text and commands.
 local FOOD_BY_LOWER = {}
@@ -768,6 +775,62 @@ function FOOD_BY_LOWER.find_in(text)
     return nil
 end
 
+-- What each food does for a chocobo (//crt food <name>). From BG-Wiki's Chocobo
+-- Raising page and item notes, FFXIclopedia's raising guide and the FFXIAH
+-- "demystifying" thread. Stat effects from food are small: players report a
+-- carrot often changes nothing you can see. `plan` ties it to the raising guide.
+local FOOD_INFO = {
+    ['Gysahl Greens'] = {kind = 'Greens', effect = 'Lowers hunger, small boost to affection.',
+        note = 'Your chocobo\'s favourite greens are eaten in one gulp. Two greens in a day can make it sick the next day.'},
+    ['Sharug Greens'] = {kind = 'Greens', effect = 'Lowers hunger, good boost to affection.',
+        note = 'Two greens in a day can make it sick the next day.',
+        plan = 'Keep affection high: care plans work better with high affection.'},
+    ['Azouph Greens'] = {kind = 'Greens', effect = 'Lowers hunger, good boost to affection.',
+        note = 'A good filler when you run short of carrots. Two greens in a day can make it sick the next day.',
+        plan = 'Keep affection high: care plans work better with high affection.'},
+    ['Vomp Carrot'] = {kind = 'Carrot', effect = 'Lowers hunger, small boost to Strength and Endurance.',
+        note = 'Very small: one tester saw +2 STR once and no change other times.',
+        plan = 'Phase 1 (build STR/END): 3 a day. Not useful for DSC/RCP.'},
+    ['Zegham Carrot'] = {kind = 'Carrot', effect = 'Lowers hunger, small boost to Discernment and Receptivity.',
+        note = 'Very small. Fed daily it may slowly lower the physical stats (STR/END) a little.',
+        plan = 'Phases 2-3 (trade STR/END for DSC/RCP). Skip it in phase 1.'},
+    ["San d'Orian Carrot"] = {kind = 'Carrot', effect = 'Lowers hunger, small boost to all stats.'},
+    ['Carrot Paste'] = {kind = 'Paste (chick food)', effect = 'Lowers hunger, boost to Strength and Endurance.',
+        note = 'Pastes are most filling for chicks, less so as the chocobo grows.',
+        plan = 'Phase 1 as a chick (STR/END).'},
+    ['Herb Paste'] = {kind = 'Paste (chick food)', effect = 'Lowers hunger, helps cure illness.',
+        note = 'Pastes are most filling for chicks, less so as the chocobo grows.'},
+    ['Vegetable Paste'] = {kind = 'Paste (chick food)', effect = 'Lowers hunger, boost to Discernment and Receptivity.',
+        note = 'Pastes are most filling for chicks, less so as the chocobo grows.',
+        plan = 'DSC/RCP as a chick; not in phase 1.'},
+    ['Worm Paste'] = {kind = 'Paste (chick food)', effect = 'Lowers hunger, raises energy and affection, but lowers stats.'},
+    ['Gausebit Wildgrass'] = {kind = 'Medicine', effect = 'Helps heal wounds.',
+        note = 'Chocobos don\'t like medicine. Changes from food show up the next day.'},
+    ['Tokopekko Wildgrass'] = {kind = 'Medicine', effect = 'Helps it recover from illness.',
+        note = 'Chocobos don\'t like medicine. Changes from food show up the next day.'},
+    ['Garidav Wildgrass'] = {kind = 'Medicine', effect = 'Helps cure a stomachache.',
+        note = 'Chocobos don\'t like medicine. Changes from food show up the next day.'},
+    ['Cupid Worm'] = {kind = 'Worm', effect = 'Raises affection a lot, but lowers one stat a lot.',
+        plan = 'Avoid: the stat it lowers is random.'},
+    ['Gregarious Worm'] = {kind = 'Worm', effect = 'Restores about 25% energy and fills it up completely.'},
+    ['Parasite Worm'] = {kind = 'Worm', effect = 'Makes it hungrier and lowers one stat slightly.',
+        note = 'For a chick it also changes one colour (DNA) value at random.'},
+    ['Chocolixir'] = {kind = 'Energy', effect = 'Refills energy to full.',
+        note = 'Two fill a starving chocobo; no effect if it\'s completely full. One, spend the energy, another = extra care in a day.'},
+    ['Hi-Chocolixir'] = {kind = 'Energy', effect = 'Refills energy to full.',
+        note = 'Three fill a starving chocobo.'},
+    ['Chocotonic'] = {kind = 'Stimulant', effect = 'Wakes a sleeping chocobo and restores stamina, but lowers affection slightly.'},
+    ['Celerity Salad'] = {kind = 'Salad', effect = 'Cures many conditions, including love sickness (In Love), and gives a boost to Discernment.'},
+    ['Tornado Salad'] = {kind = 'Salad', effect = 'Not documented (a "super deluxe salad created especially for chocobos").',
+        note = 'Doesn\'t restore the chocobo\'s HP.'},
+    ['Potion'] = {kind = 'Other', effect = 'No known raising benefit.',
+        note = 'Force-feeding food, potions or other items does nothing useful and can give it a stomachache.'},
+    ['Lethe Potage'] = {kind = 'Soup', effect = 'Removes learned abilities.',
+        plan = 'Never in phases 3-4: it wipes the abilities you\'re learning.'},
+    ['Lethe Consomme'] = {kind = 'Soup', effect = 'Removes learned abilities.',
+        plan = 'Never in phases 3-4: it wipes the abilities you\'re learning.'},
+}
+
 -- Match typed text ("vomp", "azouph greens") to a food name.
 local function find_food(text)
     text = tostring(text or ''):lower():gsub('^%s+', ''):gsub('%s+$', '')
@@ -779,6 +842,12 @@ local function find_food(text)
     end
     for _, f in ipairs(FOODS) do
         if f:lower():sub(1, #text) == text then
+            return f
+        end
+    end
+    -- Any word of the name ("celerity", "potage", "salad" -> the first salad).
+    for _, f in ipairs(FOODS) do
+        if f:lower():find(text, 1, true) then
             return f
         end
     end
@@ -3523,6 +3592,7 @@ local function show_help()
         '  hatch <YYYY-MM-DD> | age <days> | watch (adds 1) | watches <n>',
         '  scold | walk | undo watch|scold|walk',
         '  feed | feed <food> [n] | unfeed <food> [n]   (feedings)  |  energy',
+        '  food [name|inv]   (what a food does for the chocobo)',
         '  stories | story <name> [off] | conditions | guide ability <name>',
         '  chick | chick <clue> | chick reset|done   (lost chick quest)',
         '  careplan [plan] [days] | history | finds | friends | reminder on|off',
@@ -3877,6 +3947,80 @@ COMMAND_PARTS[#COMMAND_PARTS + 1] = function(command, args, rest)
         say(st.name .. (off and ' removed.' or (' recorded (teaches ' .. st.ability .. ').')))
     else
         return false
+    end
+    return true
+end
+
+-- Commands, part 6: //crt food - what a food does for the chocobo.
+--   //crt food            every food, one line each
+--   //crt food <name>     one food in detail (vomp, zegham, celerity, ...)
+--   //crt food inv        the chocobo foods you're carrying, with what they do
+COMMAND_PARTS[#COMMAND_PARTS + 1] = function(command, args, rest)
+    if command ~= 'food' and command ~= 'foods' and command ~= 'item' then
+        return false
+    end
+    local q = rest:lower()
+    if q == '' then
+        say('what each food does - //crt food <name> for details, //crt food inv for what you carry:')
+        for _, f in ipairs(FOODS) do
+            local fi = FOOD_INFO[f]
+            windower.add_to_chat(207, string.format('  %-20s %s', f, fi and fi.effect or '?'))
+        end
+        return true
+    end
+    if q == 'inv' or q == 'inventory' or q == 'bag' then
+        local bag = windower.ffxi.get_items and windower.ffxi.get_items(0)
+        local counts, order = {}, {}
+        local res_ok, res = pcall(require, 'resources')
+        for _, it in ipairs(type(bag) == 'table' and bag or {}) do
+            if type(it) == 'table' and it.id and it.id > 0 then
+                local log_name = res_ok and res and res.items and res.items[it.id] and res.items[it.id].enl
+                local f = FOOD_BY_LOWER.find_in(item_name(it.id)) or FOOD_BY_LOWER.find_in(log_name)
+                if f then
+                    if not counts[f] then
+                        order[#order + 1] = f
+                    end
+                    counts[f] = (counts[f] or 0) + (tonumber(it.count) or 1)
+                end
+            end
+        end
+        if #order == 0 then
+            say('no chocobo food in your inventory.')
+            return true
+        end
+        say('chocobo food you\'re carrying:')
+        for _, f in ipairs(order) do
+            windower.add_to_chat(207, string.format('  %-20s x%-3d %s', f, counts[f], FOOD_INFO[f] and FOOD_INFO[f].effect or '?'))
+        end
+        return true
+    end
+    local food = find_food(q) or FOOD_BY_LOWER.find_in(q)
+    if not food then
+        err('no chocobo food called "' .. rest .. '". //crt food lists them all.')
+        return true
+    end
+    local fi = FOOD_INFO[food] or {kind = '?', effect = 'Not documented.'}
+    say(food .. ' (' .. fi.kind .. '): ' .. fi.effect)
+    -- Conditions whose cure names this food (from the conditions list).
+    local cures = {}
+    for _, c in ipairs(CONDITIONS) do
+        if not c.good and c.cure and c.cure:lower():find(food:lower(), 1, true) then
+            cures[#cures + 1] = c.name
+        end
+    end
+    if #cures > 0 then
+        windower.add_to_chat(207, '  Cures: ' .. table.concat(cures, ', '))
+    end
+    if fi.note then
+        windower.add_to_chat(207, '  Note: ' .. fi.note)
+    end
+    if fi.plan then
+        windower.add_to_chat(207, '  Your plan (now phase ' .. guide_phase() .. '): ' .. fi.plan)
+    end
+    local n = fed_count(food)
+    windower.add_to_chat(207, '  Fed today: ' .. n .. (fed_count() > n and (' (' .. fed_count() .. ' foods in all)') or ''))
+    if full_today() and fi.kind ~= 'Medicine' then
+        windower.add_to_chat(207, '  It\'s completely full today: force-feeding can give it a stomachache.')
     end
     return true
 end
